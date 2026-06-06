@@ -44,6 +44,9 @@ cd gapless-backend
 # Install dependencies
 uv sync --all-extras
 
+# Install pre-commit hooks
+uv run pre-commit install
+
 # Copy environment variables
 cp .env.example .env
 # Edit .env with your local database credentials
@@ -95,6 +98,14 @@ uv run pytest
 ```
 
 ### Linting & Formatting
+
+Pre-commit hooks run automatically on every commit. You can also run them manually:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+Or invoke the tools directly:
 
 ```bash
 uv run ruff check app

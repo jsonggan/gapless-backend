@@ -78,6 +78,9 @@ Run everything through `uv`:
 # Install dependencies
 uv sync --all-extras
 
+# Install pre-commit hooks
+uv run pre-commit install
+
 # Start development server
 uv run uvicorn app.main:app --reload
 
@@ -86,6 +89,9 @@ uv run pytest
 
 # Run tests with coverage
 uv run pytest --cov=app --cov-report=term-missing
+
+# Run pre-commit hooks manually
+uv run pre-commit run --all-files
 
 # Lint & format
 uv run ruff check app
