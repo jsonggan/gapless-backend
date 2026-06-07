@@ -6,19 +6,19 @@ Gapless Backend is an API service built with **FastAPI**, **SQLAlchemy (async)**
 
 ## Tech Stack
 
-| Layer        | Technology                              |
-|--------------|------------------------------------------|
-| Framework    | FastAPI (async)                          |
+| Layer            | Technology                           |
+| ---------------- | ------------------------------------ |
+| Framework        | FastAPI (async)                      |
 | ORM / Migrations | SQLAlchemy 2.0 + Alembic             |
-| Database     | PostgreSQL (psycopg v3 async)            |
-| Auth         | JWT (python-jose) + bcrypt (passlib)     |
-| Settings     | Pydantic Settings                        |
-| Logging      | structlog                                |
-| Testing      | pytest + pytest-asyncio + httpx          |
-| Lint/Format  | Ruff                                     |
-| Type Check   | mypy                                     |
-| Package Mgr  | uv                                       |
-| Containers   | Docker + Docker Compose                  |
+| Database         | PostgreSQL (psycopg v3 async)        |
+| Auth             | JWT (python-jose) + bcrypt (passlib) |
+| Settings         | Pydantic Settings                    |
+| Logging          | structlog                            |
+| Testing          | pytest + pytest-asyncio + httpx      |
+| Lint/Format      | Ruff                                 |
+| Type Check       | mypy                                 |
+| Package Mgr      | uv                                   |
+| Containers       | Docker + Docker Compose              |
 
 ## Project Structure
 
@@ -30,6 +30,11 @@ gapless-backend/
 │   │   └── v1/                # API version 1
 │   │       ├── api.py         # Router aggregation
 │   │       └── endpoints/     # Route handlers (users, auth, etc.)
+│   ├── agents/                # Agent layer (tool-using LLM orchestration)
+│   │   ├── runner.py          # Manual tool-calling loop -> streams AgentEvents
+│   │   └── tools/             # Agent tools + registry
+│   │       ├── registry.py    # get_tools/get_tool/register
+│   │       └── math.py        # e.g. add(a, b)
 │   ├── core/                  # Core utilities
 │   │   ├── config.py          # Pydantic settings (.env driven)
 │   │   ├── security.py        # Password hashing & JWT helpers
@@ -126,18 +131,6 @@ docker compose down
 docker compose down -v
 ```
 
-## Environment Variables
-
-Key variables (see `.env.example` for full list):
-
-| Variable | Purpose |
-|----------|---------|
-| `APP_ENV` | `development` / `staging` / `production` |
-| `DATABASE_URL` | PostgreSQL connection string |
-| `SECRET_KEY` | JWT signing key (rotate in production) |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | JWT expiry |
-| `BACKEND_CORS_ORIGINS` | Allowed frontend origins (JSON list) |
-
 ## Testing Guidelines
 
 - Tests live in `app/tests/`
@@ -157,6 +150,17 @@ Typical flow:
 5. **Wire router** → `app/api/v1/api.py`
 6. **Migration** → `uv run alembic revision --autogenerate -m "add <name>"`
 7. **Tests** → `app/tests/test_<name>.py`
+
+## Adding an Agent Tool
+
+1. Write the tool with LangChain's `@tool` decorator in `app/agents/tools/<area>.py`
+   (clear name + docstring — the model reads these to decide when to call it).
+2. Register it in `app/agents/tools/registry.py` (`_TOOLS` list or `register(...)`).
+3. The runner auto-binds all registered tools; no endpoint changes needed.
+4. Add a test in `app/tests/test_agents.py`.
+
+The agent loop streams `AgentEvent`s (`token` / `tool_call` / `tool_result` /
+`done` / `error`) over SSE at `POST /api/v1/agents/run`.
 
 ## Important Notes
 
