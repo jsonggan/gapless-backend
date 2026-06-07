@@ -21,12 +21,18 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/gapless"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     RELOAD: bool = False
 
     BACKEND_CORS_ORIGINS: list[AnyHttpUrl] = []
+
+    # LLM (Kimi / OpenAI-compatible)
+    KIMI_API_KEY: str | None = None
+    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
+    KIMI_MODEL: str = "kimi-latest"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

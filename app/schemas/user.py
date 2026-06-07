@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from app.models.user import UserRole
+
 
 class UserBase(BaseModel):
     """Base user schema with shared attributes."""
@@ -10,6 +12,7 @@ class UserBase(BaseModel):
     username: str
     full_name: str | None = None
     is_active: bool = True
+    role: UserRole = UserRole.USER
 
 
 class UserCreate(UserBase):
@@ -26,6 +29,7 @@ class UserUpdate(BaseModel):
     full_name: str | None = None
     password: str | None = None
     is_active: bool | None = None
+    role: UserRole | None = None
 
 
 class UserPublic(UserBase):

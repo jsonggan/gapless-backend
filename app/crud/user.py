@@ -16,6 +16,11 @@ class CRUDUser:
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
+    async def get_multi(self, db: AsyncSession, *, skip: int = 0, limit: int = 100) -> list[User]:
+        """Get multiple users with pagination."""
+        result = await db.execute(select(User).offset(skip).limit(limit))
+        return list(result.scalars().all())
+
     async def get_by_email(self, db: AsyncSession, email: str) -> User | None:
         """Get a user by email."""
         result = await db.execute(select(User).where(User.email == email))
@@ -34,6 +39,7 @@ class CRUDUser:
             hashed_password=get_password_hash(obj_in.password),
             full_name=obj_in.full_name,
             is_active=obj_in.is_active,
+            role=obj_in.role.value if obj_in.role else User.role.default.arg,
         )
         db.add(db_obj)
         await db.commit()
@@ -45,6 +51,8 @@ class CRUDUser:
         update_data = obj_in.model_dump(exclude_unset=True)
         if "password" in update_data and update_data["password"]:
             update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
+        if "role" in update_data and update_data["role"]:
+            update_data["role"] = update_data["role"].value
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         db.add(db_obj)
