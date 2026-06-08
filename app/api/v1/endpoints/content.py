@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from app.api.deps import CurrentActiveUserDep
 from app.core.config import settings
 from app.schemas.content import ContentRequest, ContentResponse
-from app.services.content import generate_content
+from app.services.content import ContentGenerationError, generate_content
 
 router = APIRouter()
 
@@ -15,8 +15,11 @@ async def generate(
     current_user: CurrentActiveUserDep,
     request: ContentRequest,
 ) -> ContentResponse:
-    """Generate a content outline and plain-text content for a topic."""
+    """Generate structured learning modules for a topic."""
     if not settings.KIMI_API_KEY:
         raise HTTPException(status_code=503, detail="LLM service is not configured")
 
-    return await generate_content(request.topic)
+    try:
+        return await generate_content(request.topic)
+    except ContentGenerationError as exc:
+        raise HTTPException(status_code=502, detail="LLM returned invalid content") from exc

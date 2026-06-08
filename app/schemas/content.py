@@ -9,15 +9,24 @@ class ContentRequest(BaseModel):
     topic: str = Field(min_length=1, description="What to learn, e.g. 'teach me RAG'.")
 
 
-class ContentSection(BaseModel):
-    """One section of generated content: an outline title and its body text."""
+class ContentModule(BaseModel):
+    """A structured learning module the frontend can render into an experience."""
 
+    order: int = Field(ge=1)
     title: str
-    content: str
+    learning_objective: str
+    estimated_minutes: int = Field(ge=1)
+    explanation: str
+    key_points: list[str] = Field(min_length=2, max_length=6)
+    example: str
+    practice_prompt: str
+    success_criteria: list[str] = Field(min_length=2, max_length=5)
 
 
 class ContentResponse(BaseModel):
-    """Generated content: the outline titles paired with their written content."""
+    """Generated learning path content for a web learning experience."""
 
     topic: str
-    sections: list[ContentSection]
+    title: str
+    summary: str
+    modules: list[ContentModule] = Field(min_length=1, max_length=6)
