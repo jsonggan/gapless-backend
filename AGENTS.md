@@ -164,6 +164,6 @@ The agent loop streams `AgentEvent`s (`token` / `tool_call` / `tool_result` /
 
 ## Important Notes
 
-- Do **not** commit `.env` files; use `.env.example` for templates
+- When modifying DB structure, use Alembic via `uv run alembic ...` and include a migration file.
 - Keep business logic out of endpoints — delegate to CRUD / services
 - Maintain >= 80% test coverage (enforced in CI)

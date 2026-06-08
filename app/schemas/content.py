@@ -1,6 +1,6 @@
 """Content generation Pydantic schemas."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ContentRequest(BaseModel):
@@ -11,6 +11,8 @@ class ContentRequest(BaseModel):
 
 class ContentModule(BaseModel):
     """A structured learning module the frontend can render into an experience."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     order: int = Field(ge=1)
     title: str
@@ -26,6 +28,9 @@ class ContentModule(BaseModel):
 class ContentResponse(BaseModel):
     """Generated learning path content for a web learning experience."""
 
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int | None = None
     topic: str
     title: str
     summary: str
