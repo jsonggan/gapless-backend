@@ -20,10 +20,10 @@ class ContentModule(BaseModel):
     learning_objective: str
     estimated_minutes: int = Field(ge=1)
     explanation: str
-    key_points: list[str] = Field(min_length=2, max_length=6)
+    key_points: list[str]
     example: str
     practice_prompt: str
-    success_criteria: list[str] = Field(min_length=2, max_length=5)
+    success_criteria: list[str]
 
 
 class ContentResponse(BaseModel):
@@ -35,4 +35,4 @@ class ContentResponse(BaseModel):
     topic: str
     title: str
     summary: str
-    modules: list[ContentModule] = Field(min_length=1, max_length=6)
+    modules: list[ContentModule] = Field(min_length=1)

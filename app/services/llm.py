@@ -1,12 +1,13 @@
 """LLM provider helpers and chat service.
 
-This module centralises construction of the chat model so that both the plain
-chat endpoint and the agent runner share a single, configurable entry point.
-As the agent system grows, prefer adding new providers/models behind
-``build_chat_model`` rather than instantiating clients directly elsewhere.
+This module centralises construction of the chat model so the plain chat
+endpoint has a single, configurable entry point. Prefer adding new
+providers/models behind ``build_chat_model`` rather than instantiating clients
+directly elsewhere.
 """
 
 from collections.abc import AsyncIterator, Iterable
+from typing import Any
 
 from langchain_core.messages import (
     AIMessage,
@@ -21,11 +22,19 @@ from app.core.config import settings
 from app.schemas.llm import ChatMessage
 
 
-def build_chat_model(*, streaming: bool = True) -> ChatOpenAI:
+def build_chat_model(
+    *,
+    streaming: bool = True,
+    max_tokens: int | None = None,
+    json_mode: bool = False,
+) -> ChatOpenAI:
     """Build a configured chat model client.
 
     Args:
         streaming: Whether the client should stream tokens.
+        max_tokens: Optional output token cap; ``None`` uses the provider default.
+        json_mode: Whether the provider must return a valid JSON object. The
+            prompt must still mention JSON for Moonshot to honour it.
 
     Returns:
         A configured ``ChatOpenAI`` instance pointed at the Kimi endpoint.
@@ -36,11 +45,19 @@ def build_chat_model(*, streaming: bool = True) -> ChatOpenAI:
     api_key = settings.KIMI_API_KEY
     if not api_key:
         raise RuntimeError("KIMI_API_KEY is not configured")
+    extra_kwargs: dict[str, Any] = {}
+    if max_tokens is not None:
+        # ChatOpenAI rewrites a ``max_tokens`` kwarg to ``max_completion_tokens``,
+        # which Moonshot does not document; extra_body sends the classic key as-is.
+        extra_kwargs["extra_body"] = {"max_tokens": max_tokens}
+    if json_mode:
+        extra_kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
     return ChatOpenAI(
         model=settings.KIMI_MODEL,
         api_key=api_key,  # type: ignore[arg-type]
         base_url=settings.KIMI_BASE_URL,
         streaming=streaming,
+        **extra_kwargs,
     )
 
 

@@ -30,11 +30,6 @@ gapless-backend/
 │   │   └── v1/                # API version 1
 │   │       ├── api.py         # Router aggregation
 │   │       └── endpoints/     # Route handlers (users, auth, etc.)
-│   ├── agents/                # Agent layer (tool-using LLM orchestration)
-│   │   ├── runner.py          # Manual tool-calling loop -> streams AgentEvents
-│   │   └── tools/             # Agent tools + registry
-│   │       ├── registry.py    # get_tools/get_tool/register
-│   │       └── math.py        # e.g. add(a, b)
 │   ├── core/                  # Core utilities
 │   │   ├── config.py          # Pydantic settings (.env driven)
 │   │   ├── security.py        # Password hashing & JWT helpers
@@ -150,17 +145,6 @@ Typical flow:
 5. **Wire router** → `app/api/v1/api.py`
 6. **Migration** → `uv run alembic revision --autogenerate -m "add <name>"`
 7. **Tests** → `app/tests/test_<name>.py`
-
-## Adding an Agent Tool
-
-1. Write the tool with LangChain's `@tool` decorator in `app/agents/tools/<area>.py`
-   (clear name + docstring — the model reads these to decide when to call it).
-2. Register it in `app/agents/tools/registry.py` (`_TOOLS` list or `register(...)`).
-3. The runner auto-binds all registered tools; no endpoint changes needed.
-4. Add a test in `app/tests/test_agents.py`.
-
-The agent loop streams `AgentEvent`s (`token` / `tool_call` / `tool_result` /
-`done` / `error`) over SSE at `POST /api/v1/agents/run`.
 
 ## Important Notes
 

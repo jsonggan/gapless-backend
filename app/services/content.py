@@ -6,6 +6,7 @@ module template, while Pydantic keeps the API response predictable.
 """
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -16,7 +17,9 @@ from pydantic import ValidationError
 from app.schemas.content import ContentResponse
 from app.services.llm import build_chat_model
 
-MAX_MODULES = 6
+logger = logging.getLogger(__name__)
+
+MAX_OUTPUT_TOKENS = 16384
 
 MODULE_TEMPLATE: dict[str, Any] = {
     "order": 1,
@@ -51,7 +54,8 @@ valid JSON with this shape:
 }}
 
 Rules:
-- Produce 4 to {MAX_MODULES} modules unless the topic is very small.
+- Produce as many modules as the topic genuinely needs: a small topic may need
+  only a few, a broad or deep topic may need more.
 - Modules must be logically ordered from foundations to application.
 - Each module must be useful on its own: explain the concept, include concrete
   examples, and give a practical exercise.
@@ -125,7 +129,15 @@ async def _generate_learning_path(model: ChatOpenAI, topic: str) -> ContentRespo
             HumanMessage(content=f"Learning request: {topic}"),
         ]
     )
-    return _parse_content_payload(topic, _message_text(reply))
+    text = _message_text(reply)
+    if reply.response_metadata.get("finish_reason") == "length":
+        logger.error("LLM output hit the %s token cap for topic %r", MAX_OUTPUT_TOKENS, topic)
+        raise ContentGenerationError("LLM response was truncated before completion")
+    try:
+        return _parse_content_payload(topic, text)
+    except ContentGenerationError:
+        logger.error("Unusable LLM content for topic %r:\n%s", topic, text)
+        raise
 
 
 async def generate_content(topic: str) -> ContentResponse:
@@ -137,5 +149,5 @@ async def generate_content(topic: str) -> ContentResponse:
     Returns:
         A title, summary, and ordered module list ready for frontend rendering.
     """
-    model = build_chat_model(streaming=False)
+    model = build_chat_model(streaming=False, max_tokens=MAX_OUTPUT_TOKENS, json_mode=True)
     return await _generate_learning_path(model, topic)

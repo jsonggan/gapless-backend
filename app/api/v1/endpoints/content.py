@@ -1,5 +1,7 @@
 """Content generation endpoints."""
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import CurrentActiveUserDep, DBDep
@@ -7,6 +9,8 @@ from app.core.config import settings
 from app.crud.learning_path import learning_path as learning_path_crud
 from app.schemas.content import ContentRequest, ContentResponse
 from app.services.content import ContentGenerationError, generate_content
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,7 +28,8 @@ async def generate(
     try:
         content = await generate_content(request.topic)
     except ContentGenerationError as exc:
-        raise HTTPException(status_code=502, detail="LLM returned invalid content") from exc
+        logger.exception("Content generation failed for topic %r", request.topic)
+        raise HTTPException(status_code=502, detail=f"LLM returned invalid content: {exc}") from exc
 
     saved = await learning_path_crud.create_from_content(
         db,
