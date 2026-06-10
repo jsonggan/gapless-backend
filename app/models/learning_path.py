@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -53,17 +54,46 @@ class LearningPathModule(Base, IntegerIDMixin, TimestampMixin):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     learning_objective: Mapped[str] = mapped_column(Text, nullable=False)
     estimated_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
-    explanation: Mapped[str] = mapped_column(Text, nullable=False)
-    key_points: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    example: Mapped[str] = mapped_column(Text, nullable=False)
-    practice_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    success_criteria: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
 
     learning_path: Mapped[LearningPath] = relationship(back_populates="modules")
+    blocks: Mapped[list[LearningPathLessonBlock]] = relationship(
+        back_populates="module",
+        cascade="all, delete-orphan",
+        order_by="LearningPathLessonBlock.order",
+    )
     progress: Mapped[list[LearningPathModuleProgress]] = relationship(
         back_populates="module",
         cascade="all, delete-orphan",
     )
+
+
+class LearningPathLessonBlock(Base, IntegerIDMixin, TimestampMixin):
+    """Ordered typed lesson block inside a learning path module.
+
+    ``block_type`` discriminates the frontend block union (markdown, process,
+    single_choice_question, reflection_review); ``content`` holds the
+    type-specific payload.
+    """
+
+    __tablename__ = "learning_path_lesson_blocks"
+    __table_args__ = (
+        UniqueConstraint(
+            "module_id",
+            "order",
+            name="uq_learning_path_lesson_blocks_module_order",
+        ),
+    )
+
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_path_modules.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    order: Mapped[int] = mapped_column(Integer, nullable=False)
+    block_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    module: Mapped[LearningPathModule] = relationship(back_populates="blocks")
 
 
 class LearningPathModuleProgress(Base, IntegerIDMixin, TimestampMixin):

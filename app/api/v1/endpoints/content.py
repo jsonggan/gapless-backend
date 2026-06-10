@@ -36,4 +36,4 @@ async def generate(
         user_id=current_user.id,
         content=content,
     )
-    return ContentResponse.model_validate(saved)
+    return learning_path_crud.to_content_response(saved)

@@ -26,16 +26,34 @@ MODULE_TEMPLATE: dict[str, Any] = {
     "title": "A concise module title",
     "learning_objective": "What the learner will be able to do after this module",
     "estimated_minutes": 12,
-    "explanation": "A clear, self-contained lesson body with practical detail",
-    "key_points": [
-        "A core idea the learner should remember",
-        "Another important idea or distinction",
-    ],
-    "example": "A concrete example, scenario, command, or mini case study",
-    "practice_prompt": "A small exercise the learner can complete immediately",
-    "success_criteria": [
-        "How the learner can tell they understood the module",
-        "A second observable check for understanding",
+    "blocks": [
+        {
+            "type": "markdown",
+            "markdown": "A lesson section in Markdown: explanation, examples, code.",
+        },
+        {
+            "type": "process",
+            "title": "Name of the step-by-step workflow",
+            "steps": [
+                {"title": "First step", "description": "What to do and why"},
+                {"title": "Second step", "description": "What to do and why"},
+            ],
+        },
+        {
+            "type": "single_choice_question",
+            "question": "A knowledge-check question about this module",
+            "options": ["First option", "Second option", "Third option"],
+            "correct_option_index": 0,
+            "explanation": "Why the correct option is right",
+        },
+        {
+            "type": "reflection_review",
+            "prompt": "A small exercise the learner can complete immediately",
+            "review_criteria": [
+                "How the learner can tell they understood the module",
+                "A second observable check for understanding",
+            ],
+        },
     ],
 }
 
@@ -53,14 +71,25 @@ valid JSON with this shape:
   ]
 }}
 
+Each module's "blocks" array composes the lesson from these block types only:
+- "markdown": the lesson body. Use Markdown freely (headings, lists, bold,
+  fenced code) for explanations, examples, and case studies.
+- "process": an ordered workflow or procedure with named steps. Use only when
+  the content is genuinely sequential.
+- "single_choice_question": a knowledge check with 3-4 plausible options and
+  exactly one correct answer. "correct_option_index" is zero-based.
+- "reflection_review": a hands-on exercise plus criteria the learner uses to
+  self-review their answer.
+
 Rules:
 - Produce as many modules as the topic genuinely needs: a small topic may need
   only a few, a broad or deep topic may need more.
 - Modules must be logically ordered from foundations to application.
+- Each module needs at least three blocks: start with a markdown block, mix in
+  the other types where they fit, and end with a single_choice_question or
+  reflection_review so the learner checks their understanding.
 - Each module must be useful on its own: explain the concept, include concrete
   examples, and give a practical exercise.
-- Write for a web UI. Do not include markdown headings, code fences, or styling
-  instructions.
 - Keep explanations concise but substantial enough that the learner can act.
 - Use accurate, topic-specific content. Avoid generic study advice.
 """

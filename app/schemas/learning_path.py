@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
+
+from app.schemas.content import LessonBlock
 
 
 class LearningPathProgress(BaseModel):
@@ -40,18 +42,12 @@ class LearningPathSummary(LearningPathTitle):
 class LearningPathModuleRead(BaseModel):
     """Learning module with the current user's read state."""
 
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     order: int = Field(ge=1)
     title: str
     learning_objective: str
     estimated_minutes: int = Field(ge=1)
-    explanation: str
-    key_points: list[str]
-    example: str
-    practice_prompt: str
-    success_criteria: list[str]
+    blocks: list[LessonBlock]
     is_read: bool = False
     read_at: datetime | None = None
 

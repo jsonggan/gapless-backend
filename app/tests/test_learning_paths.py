@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.user import user as user_crud
-from app.models.learning_path import LearningPath, LearningPathModule
+from app.models.learning_path import LearningPath, LearningPathLessonBlock, LearningPathModule
 from app.models.user import User
 from app.schemas.user import UserCreate
 
@@ -27,16 +27,45 @@ async def _create_learning_path(
                 title="Retrieval Foundations",
                 learning_objective="Explain why retrieval improves generation.",
                 estimated_minutes=12,
-                explanation="Retrieval supplies grounding context before generation.",
-                key_points=[
-                    "Retrieval narrows the source material.",
-                    "Generation uses retrieved context to answer.",
-                ],
-                example="Search product docs, then answer from the matching sections.",
-                practice_prompt="List three sources your assistant should retrieve from.",
-                success_criteria=[
-                    "You can describe retrieval and generation separately.",
-                    "You can name a useful source corpus.",
+                blocks=[
+                    LearningPathLessonBlock(
+                        order=1,
+                        block_type="markdown",
+                        content={
+                            "markdown": "Retrieval supplies grounding context before generation."
+                        },
+                    ),
+                    LearningPathLessonBlock(
+                        order=2,
+                        block_type="process",
+                        content={
+                            "title": "Answer with retrieval",
+                            "steps": [
+                                {
+                                    "title": "Search",
+                                    "description": "Find the matching documents.",
+                                },
+                                {
+                                    "title": "Generate",
+                                    "description": "Answer from the retrieved context.",
+                                },
+                            ],
+                        },
+                    ),
+                    LearningPathLessonBlock(
+                        order=3,
+                        block_type="single_choice_question",
+                        content={
+                            "question": "What does retrieval add to generation?",
+                            "options": [
+                                "Grounding context",
+                                "More parameters",
+                                "Faster decoding",
+                            ],
+                            "correct_option_index": 0,
+                            "explanation": "Retrieval supplies source material to answer from.",
+                        },
+                    ),
                 ],
             ),
             LearningPathModule(
@@ -44,16 +73,23 @@ async def _create_learning_path(
                 title="Chunking Strategy",
                 learning_objective="Choose chunks that preserve useful context.",
                 estimated_minutes=15,
-                explanation="Chunk size controls precision, recall, and context quality.",
-                key_points=[
-                    "Small chunks can lose context.",
-                    "Large chunks can dilute relevance.",
-                ],
-                example="Split an API guide by heading and section boundaries.",
-                practice_prompt="Draft a chunking rule for one technical document.",
-                success_criteria=[
-                    "Your chunks have stable boundaries.",
-                    "Your chunks can answer likely questions.",
+                blocks=[
+                    LearningPathLessonBlock(
+                        order=1,
+                        block_type="markdown",
+                        content={"markdown": "Chunk size controls precision, recall, and context."},
+                    ),
+                    LearningPathLessonBlock(
+                        order=2,
+                        block_type="reflection_review",
+                        content={
+                            "prompt": "Draft a chunking rule for one technical document.",
+                            "review_criteria": [
+                                "Your chunks have stable boundaries.",
+                                "Your chunks can answer likely questions.",
+                            ],
+                        },
+                    ),
                 ],
             ),
         ],
@@ -133,6 +169,24 @@ class TestLearningPaths:
         detail = detail_response.json()
         assert detail["progress"]["progress_percent"] == 0
         assert [module["is_read"] for module in detail["modules"]] == [False, False]
+        assert [block["type"] for block in detail["modules"][0]["blocks"]] == [
+            "markdown",
+            "process",
+            "single_choice_question",
+        ]
+        assert detail["modules"][0]["blocks"][0] == {
+            "type": "markdown",
+            "markdown": "Retrieval supplies grounding context before generation.",
+        }
+        assert detail["modules"][0]["blocks"][2]["correct_option_index"] == 0
+        assert [block["type"] for block in detail["modules"][1]["blocks"]] == [
+            "markdown",
+            "reflection_review",
+        ]
+        assert detail["modules"][1]["blocks"][1]["review_criteria"] == [
+            "Your chunks have stable boundaries.",
+            "Your chunks can answer likely questions.",
+        ]
 
         progress_response = await auth_client.patch(
             f"/api/v1/learning-paths/{path.id}/modules/{first_module.id}/progress",

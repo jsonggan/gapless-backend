@@ -5,8 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.base import utc_now
-from app.models.learning_path import LearningPath, LearningPathModule, LearningPathModuleProgress
-from app.schemas.content import ContentResponse
+from app.models.learning_path import (
+    LearningPath,
+    LearningPathLessonBlock,
+    LearningPathModule,
+    LearningPathModuleProgress,
+)
+from app.schemas.content import (
+    ContentModule,
+    ContentResponse,
+    LessonBlock,
+    lesson_block_adapter,
+)
 from app.schemas.learning_path import (
     LearningHistory,
     LearningHistoryActivity,
@@ -42,11 +52,14 @@ class CRUDLearningPath:
                     title=module.title,
                     learning_objective=module.learning_objective,
                     estimated_minutes=module.estimated_minutes,
-                    explanation=module.explanation,
-                    key_points=module.key_points,
-                    example=module.example,
-                    practice_prompt=module.practice_prompt,
-                    success_criteria=module.success_criteria,
+                    blocks=[
+                        LearningPathLessonBlock(
+                            order=index,
+                            block_type=block.type,
+                            content=block.model_dump(exclude={"type"}),
+                        )
+                        for index, block in enumerate(module.blocks, start=1)
+                    ],
                 )
                 for module in content.modules
             ],
@@ -66,7 +79,7 @@ class CRUDLearningPath:
         """List learning paths owned by a user with modules loaded."""
         result = await db.execute(
             select(LearningPath)
-            .options(selectinload(LearningPath.modules))
+            .options(selectinload(LearningPath.modules).selectinload(LearningPathModule.blocks))
             .where(LearningPath.user_id == user_id)
             .order_by(desc(LearningPath.updated_at), desc(LearningPath.id))
             .offset(skip)
@@ -84,7 +97,7 @@ class CRUDLearningPath:
         """Get one user-owned learning path with ordered modules loaded."""
         result = await db.execute(
             select(LearningPath)
-            .options(selectinload(LearningPath.modules))
+            .options(selectinload(LearningPath.modules).selectinload(LearningPathModule.blocks))
             .where(
                 LearningPath.id == learning_path_id,
                 LearningPath.user_id == user_id,
@@ -123,7 +136,7 @@ class CRUDLearningPath:
         """Build the dashboard learning history for a user."""
         result = await db.execute(
             select(LearningPath)
-            .options(selectinload(LearningPath.modules))
+            .options(selectinload(LearningPath.modules).selectinload(LearningPathModule.blocks))
             .where(LearningPath.user_id == user_id)
             .order_by(desc(LearningPath.updated_at), desc(LearningPath.id))
         )
@@ -330,13 +343,36 @@ class CRUDLearningPath:
             title=module.title,
             learning_objective=module.learning_objective,
             estimated_minutes=module.estimated_minutes,
-            explanation=module.explanation,
-            key_points=module.key_points,
-            example=module.example,
-            practice_prompt=module.practice_prompt,
-            success_criteria=module.success_criteria,
+            blocks=self.to_lesson_blocks(module),
             is_read=progress.is_read if progress else False,
             read_at=progress.read_at if progress else None,
+        )
+
+    def to_lesson_blocks(self, module: LearningPathModule) -> list[LessonBlock]:
+        """Rebuild typed lesson blocks from stored block rows."""
+        return [
+            lesson_block_adapter.validate_python({"type": block.block_type, **block.content})
+            for block in module.blocks
+        ]
+
+    def to_content_response(self, path: LearningPath) -> ContentResponse:
+        """Build the generated-content response from a persisted learning path."""
+        return ContentResponse(
+            id=path.id,
+            topic=path.topic,
+            title=path.title,
+            summary=path.summary,
+            modules=[
+                ContentModule(
+                    id=module.id,
+                    order=module.order,
+                    title=module.title,
+                    learning_objective=module.learning_objective,
+                    estimated_minutes=module.estimated_minutes,
+                    blocks=self.to_lesson_blocks(module),
+                )
+                for module in path.modules
+            ],
         )
 
     def estimated_minutes(self, path: LearningPath) -> int:

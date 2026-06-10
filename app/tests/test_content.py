@@ -8,9 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.learning_path import LearningPath
+from app.models.learning_path import LearningPath, LearningPathModule
 from app.models.user import User
-from app.schemas.content import ContentModule, ContentResponse
+from app.schemas.content import (
+    ContentModule,
+    ContentResponse,
+    MarkdownBlock,
+    ProcessBlock,
+    ProcessStep,
+    ReflectionReviewBlock,
+    SingleChoiceQuestionBlock,
+)
 
 
 def _content_response() -> ContentResponse:
@@ -24,16 +32,33 @@ def _content_response() -> ContentResponse:
                 title="Retrieval Foundations",
                 learning_objective="Explain why retrieval improves generation.",
                 estimated_minutes=12,
-                explanation="Retrieval supplies grounding context before generation.",
-                key_points=[
-                    "Retrieval narrows the source material.",
-                    "Generation uses retrieved context to answer.",
-                ],
-                example="Search product docs, then answer from the matching sections.",
-                practice_prompt="List three sources your assistant should retrieve from.",
-                success_criteria=[
-                    "You can describe retrieval and generation separately.",
-                    "You can name a useful source corpus.",
+                blocks=[
+                    MarkdownBlock(
+                        markdown="Retrieval supplies grounding context before generation.",
+                    ),
+                    ProcessBlock(
+                        title="Answer with retrieval",
+                        steps=[
+                            ProcessStep(
+                                title="Search",
+                                description="Find the matching documents.",
+                            ),
+                            ProcessStep(
+                                title="Generate",
+                                description="Answer from the retrieved context.",
+                            ),
+                        ],
+                    ),
+                    SingleChoiceQuestionBlock(
+                        question="What does retrieval add to generation?",
+                        options=[
+                            "Grounding context",
+                            "More parameters",
+                            "Faster decoding",
+                        ],
+                        correct_option_index=0,
+                        explanation="Retrieval supplies source material to answer from.",
+                    ),
                 ],
             ),
             ContentModule(
@@ -41,16 +66,17 @@ def _content_response() -> ContentResponse:
                 title="Chunking Strategy",
                 learning_objective="Choose chunks that preserve useful context.",
                 estimated_minutes=15,
-                explanation="Chunk size controls precision, recall, and context quality.",
-                key_points=[
-                    "Small chunks can lose context.",
-                    "Large chunks can dilute relevance.",
-                ],
-                example="Split an API guide by heading and section boundaries.",
-                practice_prompt="Draft a chunking rule for one technical document.",
-                success_criteria=[
-                    "Your chunks have stable boundaries.",
-                    "Your chunks can answer likely questions.",
+                blocks=[
+                    MarkdownBlock(
+                        markdown="Chunk size controls precision, recall, and context.",
+                    ),
+                    ReflectionReviewBlock(
+                        prompt="Draft a chunking rule for one technical document.",
+                        review_criteria=[
+                            "Your chunks have stable boundaries.",
+                            "Your chunks can answer likely questions.",
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -85,10 +111,19 @@ class TestContentGenerate:
         assert data["topic"] == "teach me RAG"
         assert [module["order"] for module in data["modules"]] == [1, 2]
         assert all(isinstance(module["id"], int) for module in data["modules"])
+        assert [block["type"] for block in data["modules"][0]["blocks"]] == [
+            "markdown",
+            "process",
+            "single_choice_question",
+        ]
+        assert [block["type"] for block in data["modules"][1]["blocks"]] == [
+            "markdown",
+            "reflection_review",
+        ]
 
         result = await db.execute(
             select(LearningPath)
-            .options(selectinload(LearningPath.modules))
+            .options(selectinload(LearningPath.modules).selectinload(LearningPathModule.blocks))
             .where(LearningPath.id == data["id"])
         )
         learning_path = result.scalar_one()
@@ -99,6 +134,16 @@ class TestContentGenerate:
             "Retrieval Foundations",
             "Chunking Strategy",
         ]
+        first_blocks = learning_path.modules[0].blocks
+        assert [block.block_type for block in first_blocks] == [
+            "markdown",
+            "process",
+            "single_choice_question",
+        ]
+        assert first_blocks[0].content == {
+            "markdown": "Retrieval supplies grounding context before generation."
+        }
+        assert first_blocks[2].content["correct_option_index"] == 0
 
     @pytest.mark.asyncio
     async def test_generate_not_configured(
