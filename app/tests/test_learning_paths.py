@@ -171,6 +171,115 @@ class TestLearningPaths:
         assert unread["progress"]["next_module_id"] == first_module.id
 
     @pytest.mark.asyncio
+    async def test_history_returns_stats_recent_paths_and_activity(
+        self,
+        auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
+    ) -> None:
+        first_path = await _create_learning_path(db, user_id=test_user.id)
+        second_path = await _create_learning_path(
+            db,
+            user_id=test_user.id,
+            title="Prompt Engineering",
+        )
+        other_user = await user_crud.create(
+            db,
+            UserCreate(
+                email="other@example.com",
+                username="otheruser",
+                password="password123",
+            ),
+        )
+        await _create_learning_path(db, user_id=other_user.id, title="Other User Path")
+
+        for module in second_path.modules:
+            response = await auth_client.post(
+                f"/api/v1/learning-paths/{second_path.id}/modules/{module.id}/read"
+            )
+            assert response.status_code == 200
+        response = await auth_client.post(
+            f"/api/v1/learning-paths/{first_path.id}/modules/{first_path.modules[0].id}/read"
+        )
+        assert response.status_code == 200
+
+        history_response = await auth_client.get("/api/v1/learning-paths/history")
+
+        assert history_response.status_code == 200
+        history = history_response.json()
+        assert history["stats"] == {
+            "total_paths": 2,
+            "completed_paths": 1,
+            "in_progress_paths": 1,
+            "total_modules": 4,
+            "read_modules": 3,
+            "minutes_read": 39,
+        }
+
+        recent_path_ids = [path["id"] for path in history["recent_paths"]]
+        assert set(recent_path_ids) == {first_path.id, second_path.id}
+        recent_by_id = {path["id"]: path for path in history["recent_paths"]}
+        assert recent_by_id[second_path.id]["is_completed"] is True
+        assert recent_by_id[first_path.id]["progress_percent"] == 50
+
+        activity = history["recent_activity"]
+        assert len(activity) == 3
+        assert activity[0]["learning_path_id"] == first_path.id
+        assert activity[0]["module_title"] == "Retrieval Foundations"
+        assert all(item["read_at"] is not None for item in activity)
+        assert {item["learning_path_id"] for item in activity} == {
+            first_path.id,
+            second_path.id,
+        }
+
+    @pytest.mark.asyncio
+    async def test_history_is_empty_for_new_user(
+        self,
+        auth_client: AsyncClient,
+    ) -> None:
+        response = await auth_client.get("/api/v1/learning-paths/history")
+
+        assert response.status_code == 200
+        history = response.json()
+        assert history["stats"] == {
+            "total_paths": 0,
+            "completed_paths": 0,
+            "in_progress_paths": 0,
+            "total_modules": 0,
+            "read_modules": 0,
+            "minutes_read": 0,
+        }
+        assert history["recent_paths"] == []
+        assert history["recent_activity"] == []
+
+    @pytest.mark.asyncio
+    async def test_history_respects_limits(
+        self,
+        auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
+    ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        await _create_learning_path(db, user_id=test_user.id, title="Second Path")
+        for module in path.modules:
+            response = await auth_client.post(
+                f"/api/v1/learning-paths/{path.id}/modules/{module.id}/read"
+            )
+            assert response.status_code == 200
+
+        response = await auth_client.get(
+            "/api/v1/learning-paths/history",
+            params={"recent_paths_limit": 1, "recent_activity_limit": 1},
+        )
+
+        assert response.status_code == 200
+        history = response.json()
+        assert history["stats"]["total_paths"] == 2
+        assert len(history["recent_paths"]) == 1
+        assert len(history["recent_activity"]) == 1
+        assert history["recent_activity"][0]["module_title"] == "Chunking Strategy"
+
+    @pytest.mark.asyncio
     async def test_progress_endpoints_enforce_learning_path_ownership(
         self,
         auth_client: AsyncClient,

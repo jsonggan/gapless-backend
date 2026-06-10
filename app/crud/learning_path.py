@@ -8,6 +8,9 @@ from app.db.base import utc_now
 from app.models.learning_path import LearningPath, LearningPathModule, LearningPathModuleProgress
 from app.schemas.content import ContentResponse
 from app.schemas.learning_path import (
+    LearningHistory,
+    LearningHistoryActivity,
+    LearningHistoryStats,
     LearningPathDetail,
     LearningPathModuleProgressResult,
     LearningPathModuleRead,
@@ -108,6 +111,78 @@ class CRUDLearningPath:
             )
         )
         return list(result.scalars().all())
+
+    async def history_for_user(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        recent_paths_limit: int = 5,
+        recent_activity_limit: int = 10,
+    ) -> LearningHistory:
+        """Build the dashboard learning history for a user."""
+        result = await db.execute(
+            select(LearningPath)
+            .options(selectinload(LearningPath.modules))
+            .where(LearningPath.user_id == user_id)
+            .order_by(desc(LearningPath.updated_at), desc(LearningPath.id))
+        )
+        paths = list(result.scalars().all())
+        progress_rows = await self.progress_for_paths(db, user_id=user_id, paths=paths)
+
+        summaries = [self.to_summary(path, progress_rows) for path in paths]
+        modules_by_id = {module.id: module for path in paths for module in path.modules}
+        read_module_ids = {
+            progress.module_id
+            for progress in progress_rows
+            if progress.is_read and progress.module_id in modules_by_id
+        }
+        stats = LearningHistoryStats(
+            total_paths=len(paths),
+            completed_paths=sum(1 for summary in summaries if summary.is_completed),
+            in_progress_paths=sum(
+                1 for summary in summaries if summary.read_modules > 0 and not summary.is_completed
+            ),
+            total_modules=len(modules_by_id),
+            read_modules=len(read_module_ids),
+            minutes_read=sum(
+                modules_by_id[module_id].estimated_minutes for module_id in read_module_ids
+            ),
+        )
+
+        activity_result = await db.execute(
+            select(LearningPathModuleProgress, LearningPathModule, LearningPath)
+            .join(
+                LearningPathModule,
+                LearningPathModuleProgress.module_id == LearningPathModule.id,
+            )
+            .join(LearningPath, LearningPathModule.learning_path_id == LearningPath.id)
+            .where(
+                LearningPathModuleProgress.user_id == user_id,
+                LearningPathModuleProgress.is_read.is_(True),
+                LearningPathModuleProgress.read_at.is_not(None),
+                LearningPath.user_id == user_id,
+            )
+            .order_by(desc(LearningPathModuleProgress.read_at))
+            .limit(recent_activity_limit)
+        )
+        recent_activity = [
+            LearningHistoryActivity(
+                learning_path_id=path.id,
+                learning_path_title=path.title,
+                module_id=module.id,
+                module_title=module.title,
+                module_order=module.order,
+                read_at=progress.read_at,
+            )
+            for progress, module, path in activity_result.all()
+        ]
+
+        return LearningHistory(
+            stats=stats,
+            recent_paths=summaries[:recent_paths_limit],
+            recent_activity=recent_activity,
+        )
 
     async def set_module_read(
         self,

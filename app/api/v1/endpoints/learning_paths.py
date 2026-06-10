@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from app.api.deps import CurrentActiveUserDep, DBDep
 from app.crud.learning_path import learning_path as learning_path_crud
 from app.schemas.learning_path import (
+    LearningHistory,
     LearningPathDetail,
     LearningPathModuleProgressResult,
     LearningPathModuleProgressUpdate,
@@ -35,6 +36,22 @@ async def list_learning_path_titles(
         paths=paths,
     )
     return [learning_path_crud.to_title(path, progress_rows) for path in paths]
+
+
+@router.get("/history", response_model=LearningHistory)
+async def get_learning_history(
+    db: DBDep,
+    current_user: CurrentActiveUserDep,
+    recent_paths_limit: int = Query(default=5, ge=1, le=50),
+    recent_activity_limit: int = Query(default=10, ge=1, le=50),
+) -> LearningHistory:
+    """Get the current user's learning history for the dashboard."""
+    return await learning_path_crud.history_for_user(
+        db,
+        user_id=current_user.id,
+        recent_paths_limit=recent_paths_limit,
+        recent_activity_limit=recent_activity_limit,
+    )
 
 
 @router.get("/", response_model=list[LearningPathSummary])

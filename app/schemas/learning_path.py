@@ -70,6 +70,36 @@ class LearningPathDetail(BaseModel):
     updated_at: datetime
 
 
+class LearningHistoryStats(BaseModel):
+    """Aggregate learning stats across all of a user's learning paths."""
+
+    total_paths: int = Field(ge=0)
+    completed_paths: int = Field(ge=0)
+    in_progress_paths: int = Field(ge=0)
+    total_modules: int = Field(ge=0)
+    read_modules: int = Field(ge=0)
+    minutes_read: int = Field(ge=0)
+
+
+class LearningHistoryActivity(BaseModel):
+    """A single module-read event for the dashboard activity feed."""
+
+    learning_path_id: int
+    learning_path_title: str
+    module_id: int
+    module_title: str
+    module_order: int = Field(ge=1)
+    read_at: datetime
+
+
+class LearningHistory(BaseModel):
+    """Dashboard payload with learning stats, recent paths, and activity."""
+
+    stats: LearningHistoryStats
+    recent_paths: list[LearningPathSummary]
+    recent_activity: list[LearningHistoryActivity]
+
+
 class LearningPathModuleProgressUpdate(BaseModel):
     """Request body for setting module read state."""
 
