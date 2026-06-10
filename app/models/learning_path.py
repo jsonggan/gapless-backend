@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,3 +60,35 @@ class LearningPathModule(Base, IntegerIDMixin, TimestampMixin):
     success_criteria: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
 
     learning_path: Mapped[LearningPath] = relationship(back_populates="modules")
+    progress: Mapped[list[LearningPathModuleProgress]] = relationship(
+        back_populates="module",
+        cascade="all, delete-orphan",
+    )
+
+
+class LearningPathModuleProgress(Base, IntegerIDMixin, TimestampMixin):
+    """Per-user read state for an individual learning path module."""
+
+    __tablename__ = "learning_path_module_progress"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "module_id",
+            name="uq_learning_path_module_progress_user_module",
+        ),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_path_modules.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    module: Mapped[LearningPathModule] = relationship(back_populates="progress")

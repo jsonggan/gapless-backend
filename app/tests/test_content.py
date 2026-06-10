@@ -84,6 +84,7 @@ class TestContentGenerate:
         assert isinstance(data["id"], int)
         assert data["topic"] == "teach me RAG"
         assert [module["order"] for module in data["modules"]] == [1, 2]
+        assert all(isinstance(module["id"], int) for module in data["modules"])
 
         result = await db.execute(
             select(LearningPath)

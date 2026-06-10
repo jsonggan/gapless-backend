@@ -14,6 +14,7 @@ class ContentModule(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    id: int | None = None
     order: int = Field(ge=1)
     title: str
     learning_objective: str

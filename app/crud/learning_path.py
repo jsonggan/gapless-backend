@@ -1,9 +1,20 @@
 """Learning path CRUD operations."""
 
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models.learning_path import LearningPath, LearningPathModule
+from app.db.base import utc_now
+from app.models.learning_path import LearningPath, LearningPathModule, LearningPathModuleProgress
 from app.schemas.content import ContentResponse
+from app.schemas.learning_path import (
+    LearningPathDetail,
+    LearningPathModuleProgressResult,
+    LearningPathModuleRead,
+    LearningPathProgress,
+    LearningPathSummary,
+    LearningPathTitle,
+)
 
 
 class CRUDLearningPath:
@@ -40,6 +51,222 @@ class CRUDLearningPath:
         db.add(db_obj)
         await db.commit()
         return db_obj
+
+    async def list_for_user(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[LearningPath]:
+        """List learning paths owned by a user with modules loaded."""
+        result = await db.execute(
+            select(LearningPath)
+            .options(selectinload(LearningPath.modules))
+            .where(LearningPath.user_id == user_id)
+            .order_by(desc(LearningPath.updated_at), desc(LearningPath.id))
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_for_user(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        learning_path_id: int,
+    ) -> LearningPath | None:
+        """Get one user-owned learning path with ordered modules loaded."""
+        result = await db.execute(
+            select(LearningPath)
+            .options(selectinload(LearningPath.modules))
+            .where(
+                LearningPath.id == learning_path_id,
+                LearningPath.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def progress_for_paths(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        paths: list[LearningPath],
+    ) -> list[LearningPathModuleProgress]:
+        """Load read-state rows for the modules in the given paths."""
+        module_ids = [module.id for path in paths for module in path.modules]
+        if not module_ids:
+            return []
+
+        result = await db.execute(
+            select(LearningPathModuleProgress).where(
+                LearningPathModuleProgress.user_id == user_id,
+                LearningPathModuleProgress.module_id.in_(module_ids),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def set_module_read(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        learning_path_id: int,
+        module_id: int,
+        is_read: bool,
+    ) -> LearningPathModuleProgressResult | None:
+        """Set read state for a module in a user-owned learning path."""
+        path = await self.get_for_user(
+            db,
+            user_id=user_id,
+            learning_path_id=learning_path_id,
+        )
+        if path is None:
+            return None
+
+        module = next((item for item in path.modules if item.id == module_id), None)
+        if module is None:
+            return None
+
+        result = await db.execute(
+            select(LearningPathModuleProgress).where(
+                LearningPathModuleProgress.user_id == user_id,
+                LearningPathModuleProgress.module_id == module_id,
+            )
+        )
+        progress_row = result.scalar_one_or_none()
+        if progress_row is None:
+            progress_row = LearningPathModuleProgress(
+                user_id=user_id,
+                module_id=module_id,
+            )
+            db.add(progress_row)
+
+        progress_row.is_read = is_read
+        progress_row.read_at = utc_now() if is_read else None
+
+        await db.commit()
+        await db.refresh(progress_row)
+
+        progress_rows = await self.progress_for_paths(db, user_id=user_id, paths=[path])
+        path_progress = self.to_progress(path, progress_rows)
+        return LearningPathModuleProgressResult(
+            module_id=module_id,
+            is_read=progress_row.is_read,
+            read_at=progress_row.read_at,
+            progress=path_progress,
+        )
+
+    def to_progress(
+        self,
+        path: LearningPath,
+        progress_rows: list[LearningPathModuleProgress],
+    ) -> LearningPathProgress:
+        """Compute path progress from loaded modules and read-state rows."""
+        read_module_ids = {progress.module_id for progress in progress_rows if progress.is_read}
+        total_modules = len(path.modules)
+        read_modules = sum(1 for module in path.modules if module.id in read_module_ids)
+        progress_percent = round((read_modules / total_modules) * 100) if total_modules else 0
+        next_module_id = next(
+            (module.id for module in path.modules if module.id not in read_module_ids),
+            None,
+        )
+
+        return LearningPathProgress(
+            total_modules=total_modules,
+            read_modules=read_modules,
+            progress_percent=progress_percent,
+            is_completed=total_modules > 0 and read_modules == total_modules,
+            next_module_id=next_module_id,
+        )
+
+    def to_title(
+        self,
+        path: LearningPath,
+        progress_rows: list[LearningPathModuleProgress],
+    ) -> LearningPathTitle:
+        """Build a lightweight title payload for frontend navigation."""
+        progress = self.to_progress(path, progress_rows)
+        return LearningPathTitle(
+            id=path.id,
+            title=path.title,
+            topic=path.topic,
+            progress_percent=progress.progress_percent,
+            is_completed=progress.is_completed,
+            updated_at=path.updated_at,
+        )
+
+    def to_summary(
+        self,
+        path: LearningPath,
+        progress_rows: list[LearningPathModuleProgress],
+    ) -> LearningPathSummary:
+        """Build a library/list item response for a learning path."""
+        progress = self.to_progress(path, progress_rows)
+        return LearningPathSummary(
+            id=path.id,
+            title=path.title,
+            topic=path.topic,
+            summary=path.summary,
+            total_modules=progress.total_modules,
+            read_modules=progress.read_modules,
+            progress_percent=progress.progress_percent,
+            is_completed=progress.is_completed,
+            estimated_minutes=self.estimated_minutes(path),
+            next_module_id=progress.next_module_id,
+            created_at=path.created_at,
+            updated_at=path.updated_at,
+        )
+
+    def to_detail(
+        self,
+        path: LearningPath,
+        progress_rows: list[LearningPathModuleProgress],
+    ) -> LearningPathDetail:
+        """Build a full learning path response with module read state."""
+        progress_by_module_id = {progress.module_id: progress for progress in progress_rows}
+        return LearningPathDetail(
+            id=path.id,
+            topic=path.topic,
+            title=path.title,
+            summary=path.summary,
+            estimated_minutes=self.estimated_minutes(path),
+            progress=self.to_progress(path, progress_rows),
+            modules=[
+                self.to_module_read(module, progress_by_module_id.get(module.id))
+                for module in path.modules
+            ],
+            created_at=path.created_at,
+            updated_at=path.updated_at,
+        )
+
+    def to_module_read(
+        self,
+        module: LearningPathModule,
+        progress: LearningPathModuleProgress | None,
+    ) -> LearningPathModuleRead:
+        """Build a module response with read state."""
+        return LearningPathModuleRead(
+            id=module.id,
+            order=module.order,
+            title=module.title,
+            learning_objective=module.learning_objective,
+            estimated_minutes=module.estimated_minutes,
+            explanation=module.explanation,
+            key_points=module.key_points,
+            example=module.example,
+            practice_prompt=module.practice_prompt,
+            success_criteria=module.success_criteria,
+            is_read=progress.is_read if progress else False,
+            read_at=progress.read_at if progress else None,
+        )
+
+    def estimated_minutes(self, path: LearningPath) -> int:
+        """Return total estimated minutes across path modules."""
+        return sum(module.estimated_minutes for module in path.modules)
 
 
 learning_path = CRUDLearningPath()

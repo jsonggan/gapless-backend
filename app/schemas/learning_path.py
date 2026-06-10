@@ -1,0 +1,85 @@
+"""Learning path API schemas."""
+
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class LearningPathProgress(BaseModel):
+    """Computed progress for a user's learning path."""
+
+    total_modules: int = Field(ge=0)
+    read_modules: int = Field(ge=0)
+    progress_percent: int = Field(ge=0, le=100)
+    is_completed: bool
+    next_module_id: int | None = None
+
+
+class LearningPathTitle(BaseModel):
+    """Lightweight path metadata for frontend title selectors."""
+
+    id: int
+    title: str
+    topic: str
+    progress_percent: int = Field(ge=0, le=100)
+    is_completed: bool
+    updated_at: datetime
+
+
+class LearningPathSummary(LearningPathTitle):
+    """Learning path summary for library views."""
+
+    summary: str
+    total_modules: int = Field(ge=0)
+    read_modules: int = Field(ge=0)
+    estimated_minutes: int = Field(ge=0)
+    next_module_id: int | None = None
+    created_at: datetime
+
+
+class LearningPathModuleRead(BaseModel):
+    """Learning module with the current user's read state."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order: int = Field(ge=1)
+    title: str
+    learning_objective: str
+    estimated_minutes: int = Field(ge=1)
+    explanation: str
+    key_points: list[str]
+    example: str
+    practice_prompt: str
+    success_criteria: list[str]
+    is_read: bool = False
+    read_at: datetime | None = None
+
+
+class LearningPathDetail(BaseModel):
+    """Complete learning path payload for a course-like learning experience."""
+
+    id: int
+    topic: str
+    title: str
+    summary: str
+    estimated_minutes: int = Field(ge=0)
+    progress: LearningPathProgress
+    modules: list[LearningPathModuleRead]
+    created_at: datetime
+    updated_at: datetime
+
+
+class LearningPathModuleProgressUpdate(BaseModel):
+    """Request body for setting module read state."""
+
+    is_read: bool = True
+
+
+class LearningPathModuleProgressResult(BaseModel):
+    """Response after changing a module's read state."""
+
+    module_id: int
+    is_read: bool
+    read_at: datetime | None
+    progress: LearningPathProgress
