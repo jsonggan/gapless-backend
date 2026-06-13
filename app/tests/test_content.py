@@ -1,5 +1,6 @@
 """Tests for content generation endpoints."""
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -19,6 +20,7 @@ from app.schemas.content import (
     ReflectionReviewBlock,
     SingleChoiceQuestionBlock,
 )
+from app.services.content import _parse_content_payload
 
 
 def _content_response() -> ContentResponse:
@@ -81,6 +83,67 @@ def _content_response() -> ContentResponse:
             ),
         ],
     )
+
+
+class TestContentService:
+    """Tests for content parsing helpers."""
+
+    def test_parse_content_payload_allows_code_fences_inside_markdown(self) -> None:
+        payload = {
+            "title": "Production RAG Systems",
+            "summary": "A practical path for production retrieval systems.",
+            "modules": [
+                {
+                    "order": 1,
+                    "title": "Retrieval Architecture",
+                    "learning_objective": "Design a production RAG retrieval flow.",
+                    "estimated_minutes": 18,
+                    "blocks": [
+                        {
+                            "type": "markdown",
+                            "markdown": (
+                                "## Hybrid retrieval\n\n"
+                                "```python\n"
+                                "async def retrieve(query: str):\n"
+                                "    return await vector_search(query)\n"
+                                "```"
+                            ),
+                        },
+                        {
+                            "type": "process",
+                            "title": "Deploy retrieval",
+                            "steps": [
+                                {
+                                    "title": "Index documents",
+                                    "description": "Store chunks and metadata.",
+                                },
+                                {
+                                    "title": "Query documents",
+                                    "description": "Retrieve the most relevant chunks.",
+                                },
+                            ],
+                        },
+                        {
+                            "type": "single_choice_question",
+                            "question": "What does hybrid retrieval combine?",
+                            "options": [
+                                "Sparse and dense search",
+                                "Two LLM prompts",
+                                "Only cached answers",
+                            ],
+                            "correct_option_index": 0,
+                            "explanation": "Hybrid retrieval combines exact and semantic matching.",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        parsed = _parse_content_payload("production RAG", json.dumps(payload))
+
+        assert parsed.title == "Production RAG Systems"
+        assert parsed.modules[0].blocks[0].type == "markdown"
+        assert "```python" in parsed.modules[0].blocks[0].markdown
 
 
 class TestContentGenerate:

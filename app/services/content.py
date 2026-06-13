@@ -7,7 +7,6 @@ module template, while Pydantic keeps the API response predictable.
 
 import json
 import logging
-import re
 from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -86,16 +85,13 @@ Rules:
   only a few, a broad or deep topic may need more.
 - Modules must be logically ordered from foundations to application.
 - Each module needs at least three blocks: start with a markdown block, mix in
-  the other types where they fit, and end with a single_choice_question or
+  the other types where they fit, and end with a single_choice_question and
   reflection_review so the learner checks their understanding.
 - Each module must be useful on its own: explain the concept, include concrete
   examples, and give a practical exercise.
 - Keep explanations concise but substantial enough that the learner can act.
 - Use accurate, topic-specific content. Avoid generic study advice.
 """
-
-_JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
-
 
 class ContentGenerationError(ValueError):
     """Raised when the model returns content that cannot become a learning path."""
@@ -109,9 +105,19 @@ def _message_text(message: BaseMessage) -> str:
 
 def _extract_json_payload(text: str) -> str:
     """Extract the JSON payload from a plain or fenced model reply."""
-    fenced = _JSON_FENCE.search(text)
-    if fenced:
-        return fenced.group(1).strip()
+    stripped = text.strip()
+    decoder = json.JSONDecoder()
+
+    for index, char in enumerate(stripped):
+        if char not in "{[":
+            continue
+
+        try:
+            _, end = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+
+        return stripped[index : index + end].strip()
 
     start_candidates = [index for index in (text.find("{"), text.find("[")) if index >= 0]
     if not start_candidates:
