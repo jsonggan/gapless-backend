@@ -1,18 +1,28 @@
 """Learning path endpoints."""
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import CurrentActiveUserDep, DBDep
+from app.core.config import settings
 from app.crud.learning_path import learning_path as learning_path_crud
 from app.schemas.learning_path import (
     LearningHistory,
     LearningPathDetail,
+    LearningPathFeedbackRequest,
+    LearningPathFeedbackResponse,
     LearningPathModuleProgressResult,
     LearningPathModuleProgressUpdate,
     LearningPathSummary,
     LearningPathTitle,
 )
+from app.services.learning_feedback import (
+    LearningFeedbackGenerationError,
+    generate_learning_path_feedback,
+)
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -52,6 +62,29 @@ async def get_learning_history(
         recent_paths_limit=recent_paths_limit,
         recent_activity_limit=recent_activity_limit,
     )
+
+
+@router.post("/feedback", response_model=LearningPathFeedbackResponse)
+async def generate_feedback(
+    current_user: CurrentActiveUserDep,
+    request: LearningPathFeedbackRequest,
+) -> LearningPathFeedbackResponse:
+    """Generate AI feedback for a learner's free-text answer."""
+    if not settings.KIMI_API_KEY:
+        raise HTTPException(status_code=503, detail="LLM service is not configured")
+
+    try:
+        return await generate_learning_path_feedback(
+            context=request.context,
+            question=request.question,
+            answer=request.answer,
+        )
+    except LearningFeedbackGenerationError as exc:
+        logger.exception("Learning path feedback generation failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM returned invalid feedback: {exc}",
+        ) from exc
 
 
 @router.get("/", response_model=list[LearningPathSummary])

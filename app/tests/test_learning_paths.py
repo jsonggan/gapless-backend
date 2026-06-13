@@ -1,13 +1,46 @@
 """Tests for learning path platform-style endpoints."""
 
+from typing import cast
+from unittest.mock import patch
+
 import pytest
 from httpx import AsyncClient
+from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.user import user as user_crud
 from app.models.learning_path import LearningPath, LearningPathLessonBlock, LearningPathModule
 from app.models.user import User
+from app.schemas.learning_path import LearningPathFeedbackResponse
 from app.schemas.user import UserCreate
+from app.services.learning_feedback import (
+    LearningFeedbackGenerationError,
+    _generate_learning_path_feedback,
+    _parse_feedback_payload,
+)
+
+
+class _FakeFeedbackModel:
+    """Small async model stub used by feedback service tests."""
+
+    def __init__(self, reply: AIMessage) -> None:
+        self.reply = reply
+
+    async def ainvoke(self, messages: object) -> AIMessage:
+        return self.reply
+
+
+def _feedback_response() -> LearningPathFeedbackResponse:
+    return LearningPathFeedbackResponse(
+        feedback="You correctly identified retrieval as the source of grounding context.",
+        strengths=["Names grounding context as the key benefit."],
+        improvements=["Mention that retrieved documents should support the final answer."],
+        suggested_answer=(
+            "Retrieval adds relevant source context before generation so the answer can be "
+            "grounded in documents instead of only model memory."
+        ),
+    )
 
 
 async def _create_learning_path(
@@ -97,6 +130,46 @@ async def _create_learning_path(
     db.add(path)
     await db.commit()
     return path
+
+
+class TestLearningPathFeedbackService:
+    """Tests for free-text answer feedback helpers."""
+
+    def test_parse_feedback_payload_validates_json(self) -> None:
+        parsed = _parse_feedback_payload(
+            """
+            ```json
+            {
+              "feedback": "Good start: you connected retrieval with grounding.",
+              "strengths": ["Identifies the purpose of retrieval."],
+              "improvements": ["Add that retrieved evidence should support the answer."],
+              "suggested_answer": "Retrieval supplies relevant source material so generation can answer from evidence."
+            }
+            ```
+            """,
+        )
+
+        assert parsed.feedback.startswith("Good start")
+        assert parsed.strengths == ["Identifies the purpose of retrieval."]
+        assert parsed.improvements == ["Add that retrieved evidence should support the answer."]
+
+    def test_parse_feedback_payload_rejects_bad_shape(self) -> None:
+        with pytest.raises(LearningFeedbackGenerationError, match="feedback schema"):
+            _parse_feedback_payload('{"feedback": ""}')
+
+    @pytest.mark.asyncio
+    async def test_generate_feedback_rejects_truncated_reply(self) -> None:
+        model = _FakeFeedbackModel(
+            AIMessage(content="{}", response_metadata={"finish_reason": "length"})
+        )
+
+        with pytest.raises(LearningFeedbackGenerationError, match="truncated"):
+            await _generate_learning_path_feedback(
+                cast(ChatOpenAI, model),
+                context="Retrieval supplies grounding context.",
+                question="What does retrieval add?",
+                answer="Grounding.",
+            )
 
 
 class TestLearningPaths:
@@ -364,3 +437,92 @@ class TestLearningPaths:
 
         assert other_path_response.status_code == 404
         assert wrong_module_response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_generate_feedback_authenticated(
+        self,
+        auth_client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
+
+        with patch(
+            "app.api.v1.endpoints.learning_paths.generate_learning_path_feedback",
+            return_value=_feedback_response(),
+        ) as generate_feedback:
+            response = await auth_client.post(
+                "/api/v1/learning-paths/feedback",
+                json={
+                    "context": "Retrieval supplies grounding context before generation.",
+                    "question": "What does retrieval add to generation?",
+                    "answer": "It gives grounding context.",
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["feedback"].startswith("You correctly identified retrieval")
+        assert data["strengths"] == ["Names grounding context as the key benefit."]
+        assert data["improvements"] == [
+            "Mention that retrieved documents should support the final answer."
+        ]
+        generate_feedback.assert_awaited_once_with(
+            context="Retrieval supplies grounding context before generation.",
+            question="What does retrieval add to generation?",
+            answer="It gives grounding context.",
+        )
+
+    @pytest.mark.asyncio
+    async def test_generate_feedback_requires_auth(self, client: AsyncClient) -> None:
+        response = await client.post(
+            "/api/v1/learning-paths/feedback",
+            json={
+                "context": "Retrieval supplies grounding context before generation.",
+                "question": "What does retrieval add to generation?",
+                "answer": "It gives grounding context.",
+            },
+        )
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_generate_feedback_not_configured(
+        self,
+        auth_client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", None)
+
+        response = await auth_client.post(
+            "/api/v1/learning-paths/feedback",
+            json={
+                "context": "Retrieval supplies grounding context before generation.",
+                "question": "What does retrieval add to generation?",
+                "answer": "It gives grounding context.",
+            },
+        )
+
+        assert response.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_generate_feedback_invalid_llm_response(
+        self,
+        auth_client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
+
+        with patch(
+            "app.api.v1.endpoints.learning_paths.generate_learning_path_feedback",
+            side_effect=LearningFeedbackGenerationError("bad shape"),
+        ):
+            response = await auth_client.post(
+                "/api/v1/learning-paths/feedback",
+                json={
+                    "context": "Retrieval supplies grounding context before generation.",
+                    "question": "What does retrieval add to generation?",
+                    "answer": "It gives grounding context.",
+                },
+            )
+
+        assert response.status_code == 502

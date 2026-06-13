@@ -66,6 +66,27 @@ class LearningPathDetail(BaseModel):
     updated_at: datetime
 
 
+class LearningPathFeedbackRequest(BaseModel):
+    """Request body for AI feedback on a learner's free-text answer."""
+
+    context: str = Field(
+        min_length=1,
+        max_length=8000,
+        description="Lesson or module context needed to judge the answer.",
+    )
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=4000)
+
+
+class LearningPathFeedbackResponse(BaseModel):
+    """Structured AI feedback for a learner's answer."""
+
+    feedback: str = Field(min_length=1)
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
+    suggested_answer: str = Field(min_length=1)
+
+
 class LearningHistoryStats(BaseModel):
     """Aggregate learning stats across all of a user's learning paths."""
 
