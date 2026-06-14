@@ -7,10 +7,16 @@ import pytest
 from httpx import AsyncClient
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.user import user as user_crud
-from app.models.learning_path import LearningPath, LearningPathLessonBlock, LearningPathModule
+from app.models.learning_path import (
+    LearningPath,
+    LearningPathFeedbackAttempt,
+    LearningPathLessonBlock,
+    LearningPathModule,
+)
 from app.models.user import User
 from app.schemas.learning_path import LearningPathFeedbackResponse
 from app.schemas.user import UserCreate
@@ -31,9 +37,10 @@ class _FakeFeedbackModel:
         return self.reply
 
 
-def _feedback_response() -> LearningPathFeedbackResponse:
+def _feedback_response(feedback: str | None = None) -> LearningPathFeedbackResponse:
     return LearningPathFeedbackResponse(
-        feedback="You correctly identified retrieval as the source of grounding context.",
+        feedback=feedback
+        or "You correctly identified retrieval as the source of grounding context.",
         strengths=["Names grounding context as the key benefit."],
         improvements=["Mention that retrieved documents should support the final answer."],
         suggested_answer=(
@@ -247,7 +254,11 @@ class TestLearningPaths:
             "process",
             "single_choice_question",
         ]
+        assert detail["modules"][0]["blocks"][0]["id"] == first_module.blocks[0].id
+        assert detail["modules"][0]["blocks"][0]["order"] == 1
         assert detail["modules"][0]["blocks"][0] == {
+            "id": first_module.blocks[0].id,
+            "order": 1,
             "type": "markdown",
             "markdown": "Retrieval supplies grounding context before generation.",
         }
@@ -442,8 +453,13 @@ class TestLearningPaths:
     async def test_generate_feedback_authenticated(
         self,
         auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        first_module = path.modules[0]
+        first_block = first_module.blocks[0]
         monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
 
         with patch(
@@ -451,7 +467,10 @@ class TestLearningPaths:
             return_value=_feedback_response(),
         ) as generate_feedback:
             response = await auth_client.post(
-                "/api/v1/learning-paths/feedback",
+                (
+                    f"/api/v1/learning-paths/{path.id}/modules/{first_module.id}"
+                    f"/blocks/{first_block.id}/feedback"
+                ),
                 json={
                     "context": "Retrieval supplies grounding context before generation.",
                     "question": "What does retrieval add to generation?",
@@ -461,21 +480,98 @@ class TestLearningPaths:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["feedback"].startswith("You correctly identified retrieval")
-        assert data["strengths"] == ["Names grounding context as the key benefit."]
-        assert data["improvements"] == [
+        assert data["learning_path_id"] == path.id
+        assert data["module_id"] == first_module.id
+        assert data["lesson_block_id"] == first_block.id
+        assert data["question"] == "What does retrieval add to generation?"
+        assert data["answer"] == "It gives grounding context."
+        assert data["ai_response"]["feedback"].startswith("You correctly identified retrieval")
+        assert data["ai_response"]["strengths"] == ["Names grounding context as the key benefit."]
+        assert data["ai_response"]["improvements"] == [
             "Mention that retrieved documents should support the final answer."
         ]
+        assert data["created_at"] is not None
         generate_feedback.assert_awaited_once_with(
             context="Retrieval supplies grounding context before generation.",
             question="What does retrieval add to generation?",
             answer="It gives grounding context.",
         )
 
+        attempts = (
+            await db.execute(
+                select(LearningPathFeedbackAttempt).where(
+                    LearningPathFeedbackAttempt.user_id == test_user.id,
+                    LearningPathFeedbackAttempt.lesson_block_id == first_block.id,
+                )
+            )
+        ).scalars()
+        assert len(list(attempts)) == 1
+
+    @pytest.mark.asyncio
+    async def test_feedback_latest_returns_only_newest_attempt(
+        self,
+        auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        first_module = path.modules[0]
+        first_block = first_module.blocks[0]
+        url = (
+            f"/api/v1/learning-paths/{path.id}/modules/{first_module.id}"
+            f"/blocks/{first_block.id}/feedback"
+        )
+        monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
+
+        with patch(
+            "app.api.v1.endpoints.learning_paths.generate_learning_path_feedback",
+            side_effect=[
+                _feedback_response("First feedback."),
+                _feedback_response("Second feedback."),
+            ],
+        ):
+            first_response = await auth_client.post(
+                url,
+                json={
+                    "context": "Retrieval supplies grounding context before generation.",
+                    "question": "What does retrieval add to generation?",
+                    "answer": "It searches.",
+                },
+            )
+            second_response = await auth_client.post(
+                url,
+                json={
+                    "context": "Retrieval supplies grounding context before generation.",
+                    "question": "What does retrieval add to generation?",
+                    "answer": "It adds grounding documents.",
+                },
+            )
+
+        latest_response = await auth_client.get(f"{url}/latest")
+
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert latest_response.status_code == 200
+        latest = latest_response.json()
+        assert latest["id"] == second_response.json()["id"]
+        assert latest["answer"] == "It adds grounding documents."
+        assert latest["ai_response"]["feedback"] == "Second feedback."
+
+        attempts = (
+            await db.execute(
+                select(LearningPathFeedbackAttempt).where(
+                    LearningPathFeedbackAttempt.user_id == test_user.id,
+                    LearningPathFeedbackAttempt.lesson_block_id == first_block.id,
+                )
+            )
+        ).scalars()
+        assert len(list(attempts)) == 2
+
     @pytest.mark.asyncio
     async def test_generate_feedback_requires_auth(self, client: AsyncClient) -> None:
         response = await client.post(
-            "/api/v1/learning-paths/feedback",
+            "/api/v1/learning-paths/1/modules/1/blocks/1/feedback",
             json={
                 "context": "Retrieval supplies grounding context before generation.",
                 "question": "What does retrieval add to generation?",
@@ -489,12 +585,20 @@ class TestLearningPaths:
     async def test_generate_feedback_not_configured(
         self,
         auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        first_module = path.modules[0]
+        first_block = first_module.blocks[0]
         monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", None)
 
         response = await auth_client.post(
-            "/api/v1/learning-paths/feedback",
+            (
+                f"/api/v1/learning-paths/{path.id}/modules/{first_module.id}"
+                f"/blocks/{first_block.id}/feedback"
+            ),
             json={
                 "context": "Retrieval supplies grounding context before generation.",
                 "question": "What does retrieval add to generation?",
@@ -508,8 +612,13 @@ class TestLearningPaths:
     async def test_generate_feedback_invalid_llm_response(
         self,
         auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        first_module = path.modules[0]
+        first_block = first_module.blocks[0]
         monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
 
         with patch(
@@ -517,7 +626,10 @@ class TestLearningPaths:
             side_effect=LearningFeedbackGenerationError("bad shape"),
         ):
             response = await auth_client.post(
-                "/api/v1/learning-paths/feedback",
+                (
+                    f"/api/v1/learning-paths/{path.id}/modules/{first_module.id}"
+                    f"/blocks/{first_block.id}/feedback"
+                ),
                 json={
                     "context": "Retrieval supplies grounding context before generation.",
                     "question": "What does retrieval add to generation?",
@@ -526,3 +638,44 @@ class TestLearningPaths:
             )
 
         assert response.status_code == 502
+
+    @pytest.mark.asyncio
+    async def test_feedback_endpoints_enforce_block_ownership(
+        self,
+        auth_client: AsyncClient,
+        db: AsyncSession,
+        test_user: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = await _create_learning_path(db, user_id=test_user.id)
+        other_user = await user_crud.create(
+            db,
+            UserCreate(
+                email="feedback-owner@example.com",
+                username="feedbackowner",
+                password="password123",
+            ),
+        )
+        other_path = await _create_learning_path(db, user_id=other_user.id, title="Private Path")
+        monkeypatch.setattr("app.core.config.settings.KIMI_API_KEY", "fake-key")
+
+        wrong_owner_response = await auth_client.post(
+            (
+                f"/api/v1/learning-paths/{other_path.id}/modules/{other_path.modules[0].id}"
+                f"/blocks/{other_path.modules[0].blocks[0].id}/feedback"
+            ),
+            json={
+                "context": "Private context.",
+                "question": "Private question?",
+                "answer": "Private answer.",
+            },
+        )
+        wrong_block_response = await auth_client.get(
+
+                f"/api/v1/learning-paths/{path.id}/modules/{path.modules[0].id}"
+                f"/blocks/{other_path.modules[0].blocks[0].id}/feedback/latest"
+
+        )
+
+        assert wrong_owner_response.status_code == 404
+        assert wrong_block_response.status_code == 404

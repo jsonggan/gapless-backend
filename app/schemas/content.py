@@ -14,6 +14,8 @@ class ContentRequest(BaseModel):
 class MarkdownBlock(BaseModel):
     """A markdown-rendered lesson section."""
 
+    id: int | None = None
+    order: int | None = Field(default=None, ge=1)
     type: Literal["markdown"] = "markdown"
     markdown: str = Field(min_length=1)
 
@@ -28,6 +30,8 @@ class ProcessStep(BaseModel):
 class ProcessBlock(BaseModel):
     """An ordered step-by-step process or workflow."""
 
+    id: int | None = None
+    order: int | None = Field(default=None, ge=1)
     type: Literal["process"] = "process"
     title: str = Field(min_length=1)
     steps: list[ProcessStep] = Field(min_length=1)
@@ -36,6 +40,8 @@ class ProcessBlock(BaseModel):
 class SingleChoiceQuestionBlock(BaseModel):
     """A knowledge-check question with exactly one correct option."""
 
+    id: int | None = None
+    order: int | None = Field(default=None, ge=1)
     type: Literal["single_choice_question"] = "single_choice_question"
     question: str = Field(min_length=1)
     options: list[str] = Field(min_length=2)
@@ -53,6 +59,8 @@ class SingleChoiceQuestionBlock(BaseModel):
 class ReflectionReviewBlock(BaseModel):
     """An open exercise the learner self-reviews against criteria."""
 
+    id: int | None = None
+    order: int | None = Field(default=None, ge=1)
     type: Literal["reflection_review"] = "reflection_review"
     prompt: str = Field(min_length=1)
     review_criteria: list[str] = Field(min_length=1)

@@ -10,8 +10,8 @@ from app.crud.learning_path import learning_path as learning_path_crud
 from app.schemas.learning_path import (
     LearningHistory,
     LearningPathDetail,
+    LearningPathFeedbackAttempt,
     LearningPathFeedbackRequest,
-    LearningPathFeedbackResponse,
     LearningPathModuleProgressResult,
     LearningPathModuleProgressUpdate,
     LearningPathSummary,
@@ -64,17 +64,34 @@ async def get_learning_history(
     )
 
 
-@router.post("/feedback", response_model=LearningPathFeedbackResponse)
+@router.post(
+    "/{learning_path_id}/modules/{module_id}/blocks/{lesson_block_id}/feedback",
+    response_model=LearningPathFeedbackAttempt,
+)
 async def generate_feedback(
+    db: DBDep,
     current_user: CurrentActiveUserDep,
+    learning_path_id: int,
+    module_id: int,
+    lesson_block_id: int,
     request: LearningPathFeedbackRequest,
-) -> LearningPathFeedbackResponse:
-    """Generate AI feedback for a learner's free-text answer."""
+) -> LearningPathFeedbackAttempt:
+    """Generate and save AI feedback for a learner's free-text answer."""
     if not settings.KIMI_API_KEY:
         raise HTTPException(status_code=503, detail="LLM service is not configured")
 
+    block = await learning_path_crud.get_lesson_block_for_user(
+        db,
+        user_id=current_user.id,
+        learning_path_id=learning_path_id,
+        module_id=module_id,
+        lesson_block_id=lesson_block_id,
+    )
+    if block is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson block not found")
+
     try:
-        return await generate_learning_path_feedback(
+        ai_response = await generate_learning_path_feedback(
             context=request.context,
             question=request.question,
             answer=request.answer,
@@ -85,6 +102,50 @@ async def generate_feedback(
             status_code=502,
             detail=f"LLM returned invalid feedback: {exc}",
         ) from exc
+
+    return await learning_path_crud.create_feedback_attempt(
+        db,
+        user_id=current_user.id,
+        learning_path_id=learning_path_id,
+        module_id=module_id,
+        lesson_block_id=lesson_block_id,
+        request=request,
+        ai_response=ai_response,
+    )
+
+
+@router.get(
+    "/{learning_path_id}/modules/{module_id}/blocks/{lesson_block_id}/feedback/latest",
+    response_model=LearningPathFeedbackAttempt,
+)
+async def get_latest_feedback(
+    db: DBDep,
+    current_user: CurrentActiveUserDep,
+    learning_path_id: int,
+    module_id: int,
+    lesson_block_id: int,
+) -> LearningPathFeedbackAttempt:
+    """Return the latest saved learner answer and AI feedback for a lesson block."""
+    block = await learning_path_crud.get_lesson_block_for_user(
+        db,
+        user_id=current_user.id,
+        learning_path_id=learning_path_id,
+        module_id=module_id,
+        lesson_block_id=lesson_block_id,
+    )
+    if block is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson block not found")
+
+    attempt = await learning_path_crud.latest_feedback_attempt(
+        db,
+        user_id=current_user.id,
+        learning_path_id=learning_path_id,
+        module_id=module_id,
+        lesson_block_id=lesson_block_id,
+    )
+    if attempt is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
+    return attempt
 
 
 @router.get("/", response_model=list[LearningPathSummary])

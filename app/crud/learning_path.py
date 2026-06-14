@@ -11,6 +11,9 @@ from app.models.learning_path import (
     LearningPathModule,
     LearningPathModuleProgress,
 )
+from app.models.learning_path import (
+    LearningPathFeedbackAttempt as LearningPathFeedbackAttemptModel,
+)
 from app.schemas.content import (
     ContentModule,
     ContentResponse,
@@ -22,6 +25,9 @@ from app.schemas.learning_path import (
     LearningHistoryActivity,
     LearningHistoryStats,
     LearningPathDetail,
+    LearningPathFeedbackAttempt,
+    LearningPathFeedbackRequest,
+    LearningPathFeedbackResponse,
     LearningPathModuleProgressResult,
     LearningPathModuleRead,
     LearningPathProgress,
@@ -56,7 +62,7 @@ class CRUDLearningPath:
                         LearningPathLessonBlock(
                             order=index,
                             block_type=block.type,
-                            content=block.model_dump(exclude={"type"}),
+                            content=block.model_dump(exclude={"id", "order", "type"}),
                         )
                         for index, block in enumerate(module.blocks, start=1)
                     ],
@@ -248,6 +254,85 @@ class CRUDLearningPath:
             progress=path_progress,
         )
 
+    async def get_lesson_block_for_user(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        learning_path_id: int,
+        module_id: int,
+        lesson_block_id: int,
+    ) -> LearningPathLessonBlock | None:
+        """Get a user-owned lesson block by its full learning path location."""
+        result = await db.execute(
+            select(LearningPathLessonBlock)
+            .join(LearningPathModule, LearningPathLessonBlock.module_id == LearningPathModule.id)
+            .join(LearningPath, LearningPathModule.learning_path_id == LearningPath.id)
+            .where(
+                LearningPath.user_id == user_id,
+                LearningPath.id == learning_path_id,
+                LearningPathModule.id == module_id,
+                LearningPathLessonBlock.id == lesson_block_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_feedback_attempt(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        learning_path_id: int,
+        module_id: int,
+        lesson_block_id: int,
+        request: LearningPathFeedbackRequest,
+        ai_response: LearningPathFeedbackResponse,
+    ) -> LearningPathFeedbackAttempt:
+        """Persist one learner answer and its AI feedback."""
+        db_obj = LearningPathFeedbackAttemptModel(
+            user_id=user_id,
+            learning_path_id=learning_path_id,
+            module_id=module_id,
+            lesson_block_id=lesson_block_id,
+            question=request.question,
+            answer=request.answer,
+            feedback=ai_response.feedback,
+            strengths=ai_response.strengths,
+            improvements=ai_response.improvements,
+            suggested_answer=ai_response.suggested_answer,
+        )
+        db.add(db_obj)
+        await db.commit()
+        await db.refresh(db_obj)
+        return self.to_feedback_attempt(db_obj)
+
+    async def latest_feedback_attempt(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        learning_path_id: int,
+        module_id: int,
+        lesson_block_id: int,
+    ) -> LearningPathFeedbackAttempt | None:
+        """Return the latest saved feedback attempt for one lesson block."""
+        result = await db.execute(
+            select(LearningPathFeedbackAttemptModel)
+            .where(
+                LearningPathFeedbackAttemptModel.user_id == user_id,
+                LearningPathFeedbackAttemptModel.learning_path_id == learning_path_id,
+                LearningPathFeedbackAttemptModel.module_id == module_id,
+                LearningPathFeedbackAttemptModel.lesson_block_id == lesson_block_id,
+            )
+            .order_by(
+                desc(LearningPathFeedbackAttemptModel.created_at),
+                desc(LearningPathFeedbackAttemptModel.id),
+            )
+            .limit(1)
+        )
+        attempt = result.scalar_one_or_none()
+        return self.to_feedback_attempt(attempt) if attempt else None
+
     def to_progress(
         self,
         path: LearningPath,
@@ -351,9 +436,37 @@ class CRUDLearningPath:
     def to_lesson_blocks(self, module: LearningPathModule) -> list[LessonBlock]:
         """Rebuild typed lesson blocks from stored block rows."""
         return [
-            lesson_block_adapter.validate_python({"type": block.block_type, **block.content})
+            lesson_block_adapter.validate_python(
+                {
+                    "id": block.id,
+                    "order": block.order,
+                    "type": block.block_type,
+                    **block.content,
+                }
+            )
             for block in module.blocks
         ]
+
+    def to_feedback_attempt(
+        self,
+        attempt: LearningPathFeedbackAttemptModel,
+    ) -> LearningPathFeedbackAttempt:
+        """Build the public feedback-attempt response."""
+        return LearningPathFeedbackAttempt(
+            id=attempt.id,
+            learning_path_id=attempt.learning_path_id,
+            module_id=attempt.module_id,
+            lesson_block_id=attempt.lesson_block_id,
+            question=attempt.question,
+            answer=attempt.answer,
+            ai_response=LearningPathFeedbackResponse(
+                feedback=attempt.feedback,
+                strengths=attempt.strengths,
+                improvements=attempt.improvements,
+                suggested_answer=attempt.suggested_answer,
+            ),
+            created_at=attempt.created_at,
+        )
 
     def to_content_response(self, path: LearningPath) -> ContentResponse:
         """Build the generated-content response from a persisted learning path."""

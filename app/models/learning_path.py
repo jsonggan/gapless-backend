@@ -94,6 +94,10 @@ class LearningPathLessonBlock(Base, IntegerIDMixin, TimestampMixin):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     module: Mapped[LearningPathModule] = relationship(back_populates="blocks")
+    feedback_attempts: Mapped[list[LearningPathFeedbackAttempt]] = relationship(
+        back_populates="lesson_block",
+        cascade="all, delete-orphan",
+    )
 
 
 class LearningPathModuleProgress(Base, IntegerIDMixin, TimestampMixin):
@@ -122,3 +126,38 @@ class LearningPathModuleProgress(Base, IntegerIDMixin, TimestampMixin):
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     module: Mapped[LearningPathModule] = relationship(back_populates="progress")
+
+
+class LearningPathFeedbackAttempt(Base, IntegerIDMixin, TimestampMixin):
+    """A user's saved free-text answer and AI feedback for one lesson block."""
+
+    __tablename__ = "learning_path_feedback_attempts"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    learning_path_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_paths.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_path_modules.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    lesson_block_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_path_lesson_blocks.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    feedback: Mapped[str] = mapped_column(Text, nullable=False)
+    strengths: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    improvements: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    suggested_answer: Mapped[str] = mapped_column(Text, nullable=False)
+
+    lesson_block: Mapped[LearningPathLessonBlock] = relationship(back_populates="feedback_attempts")

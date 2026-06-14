@@ -87,6 +87,19 @@ class LearningPathFeedbackResponse(BaseModel):
     suggested_answer: str = Field(min_length=1)
 
 
+class LearningPathFeedbackAttempt(BaseModel):
+    """Saved learner answer and AI feedback for a lesson block."""
+
+    id: int
+    learning_path_id: int
+    module_id: int
+    lesson_block_id: int
+    question: str
+    answer: str
+    ai_response: LearningPathFeedbackResponse
+    created_at: datetime
+
+
 class LearningHistoryStats(BaseModel):
     """Aggregate learning stats across all of a user's learning paths."""
 
