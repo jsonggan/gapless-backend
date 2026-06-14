@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import AnyHttpUrl, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     RELOAD: bool = False
 
-    BACKEND_CORS_ORIGINS: list[AnyHttpUrl] = []
+    BACKEND_CORS_ORIGINS: list[str] = []
 
     # LLM (Kimi / OpenAI-compatible)
     KIMI_API_KEY: str | None = None
